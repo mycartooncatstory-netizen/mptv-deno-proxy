@@ -15,7 +15,7 @@ Deno.serve(async (req) => {
   const targetUrl = url.searchParams.get('url');
   
   if (!targetUrl || !/^https?:\/\//.test(targetUrl)) {
-    return new Response('MPTV Proxy is running. Use /proxy?url=...', {
+    return new Response('MPTV Proxy running. Use /?url=...', {
       status: 200,
       headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'text/plain' }
     });
@@ -42,14 +42,31 @@ Deno.serve(async (req) => {
     
     if (/\.m3u8/i.test(targetUrl)) {
       headers.set('Cache-Control', 'public, max-age=300');
+      headers.set('Content-Type', 'application/vnd.apple.mpegurl');
+      
+      // Rewrite m3u8: make relative segment URLs point back to this proxy
+      var text = await response.text();
+      var baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
+      var proxyBase = url.origin + '/?url=';
+      var lines = text.split('\n');
+      var rewritten = lines.map(function(line) {
+        var trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) return line;
+        // Relative URL → absolute → proxy
+        var abs = trimmed.startsWith('http') ? trimmed : baseUrl + trimmed;
+        return proxyBase + encodeURIComponent(abs);
+      });
+      return new Response(rewritten.join('\n'), {
+        status: response.status,
+        headers
+      });
     } else {
       headers.set('Cache-Control', 'public, max-age=86400');
+      return new Response(response.body, {
+        status: response.status,
+        headers
+      });
     }
-
-    return new Response(response.body, {
-      status: response.status,
-      headers
-    });
   } catch (err) {
     return new Response('Proxy error: ' + err.message, {
       status: 502,
